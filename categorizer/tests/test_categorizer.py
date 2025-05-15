@@ -9,7 +9,7 @@ from unittest.mock import patch, MagicMock
 
 import pandas as pd
 
-from transaction_categorizer import TransactionCategorizer
+from categorizer.transaction_categorizer import TransactionCategorizer
 
 
 class TestTransactionCategorizer(unittest.TestCase):
