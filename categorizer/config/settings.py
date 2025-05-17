@@ -16,14 +16,13 @@ CONFIG_DIR = BASE_DIR / "config"
 # Google Sheets settings
 ENCRYPT_KEY = os.environ['ENCRYPT_KEY']
 SPREADSHEET_ID = os.getenv("GSHEET_SHEET_ID")
-GOOGLE_CREDENTIALS_PATH = CONFIG_DIR / "encrypt_google_cloud_credentials.json"
+GOOGLE_CREDENTIALS_PATH =  "config/encrypt_google_cloud_credentials.json"
 
 # Sheet names and ranges
 CATEGORIES_SHEET_NAME = 'Categories'
 CATEGORIES_RANGE = 'A:B'
-TRANSACTIONS_SHEET_NAME = 'Lorcan BMO'
-TRANSACTIONS_RANGE = 'A1:E5000'
-TRANSACTION_IMPORT_RANGE = 'A1'
+CONFIG_SHEET_NAME = 'CONFIG'
+CONFIG_RANGE = 'A:E'
 
 
 # Simple logging configuration
@@ -34,3 +33,5 @@ LOG_FILE = BASE_DIR / 'logs' / 'transaction_categorizer.log'
 # OpenAI API settings
 OPENAI_MODEL = 'gpt-4o'
 OPENAI_TEMPERATURE = 0
+
+# Anthropic Settings

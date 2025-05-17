@@ -4,23 +4,21 @@ Transaction Categorizer
 
 This module automates the categorization of financial transactions using LLM.
 It loads transaction data from Google Sheets and categorizes each transaction
-using OpenAI's GPT model.
+using either OpenAI's GPT or Anthropic's Claude model.
 """
 
 import os
-import json
 import logging
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Literal
 
 import pandas as pd
 from dotenv import load_dotenv
-from langchain_openai import ChatOpenAI
-from langchain_core.messages import HumanMessage, SystemMessage
 
 from config import settings
 from utils.google_utils import GoogleSheetsClient
-from utils.prompts import build_categorization_prompt
+from utils.prompts import OpenAITransactionCategorizer, AnthropicTransactionCategorizer, build_categorization_prompt
+from utils.data_prep import prepare_categorized_data_for_sheet
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -39,7 +37,7 @@ if not logger.handlers:
     
     # File handler
     file_handler = logging.handlers.RotatingFileHandler(
-        logs_dir / "prompts.log",
+        logs_dir / "transaction_categorizer.log",
         maxBytes=1024*1024*5,  # 5MB
         backupCount=3
     )
@@ -52,123 +50,16 @@ if not logger.handlers:
     logger.addHandler(file_handler)
 
 
-class TransactionCategorizer:
+def main(llm_provider: Literal["openai", "anthropic"] = "openai"):
     """
-    A class to categorize financial transactions using LLM.
-    """
-
-    def __init__(self, api_key: str, model_name: str = "gpt-4o", temperature: float = 0):
-        """
-        Initialize the TransactionCategorizer.
-
-        Args:
-            api_key: OpenAI API key
-            model_name: Name of the OpenAI model to use
-            temperature: Temperature parameter for LLM generation
-        """
-        logger.info("Initializing TransactionCategorizer with model: %s", model_name)
-        self.llm = ChatOpenAI(
-            openai_api_key=api_key,
-            model_name=model_name,
-            temperature=temperature
-        )
-
-    def categorize_transactions(self, 
-                               categories_data: List[Dict[str, Any]], 
-                               transactions_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        Categorize a list of transactions using LLM.
-
-        Args:
-            categories_data: List of available categories and subcategories
-            transactions_data: List of transaction descriptions to categorize
-
-        Returns:
-            List of categorized transactions with additional metadata
-        """
-        logger.info("Categorizing %d transactions", len(transactions_data))
-        logger.debug(("Transaction_data: %s", transactions_data[:200]))
-        
-        # Build prompt
-        prompt = build_categorization_prompt(categories_data)
-        logger.debug("Prompt: %s", prompt)
-                
-        
-        messages = [
-            SystemMessage(content=prompt),
-            HumanMessage(content=json.dumps(transactions_data))
-        ]
-        
-        try:
-            # Get response from model
-            logger.debug("Sending request to LLM")
-            response = self.llm.invoke(messages)
-            raw_output = response.content.strip()
-            
-            try:
-                # Parse JSON response
-                categorized_transactions = json.loads(raw_output)
-                logger.info("Successfully categorized transactions")
-                return categorized_transactions
-            except json.JSONDecodeError as e:
-                logger.error("Failed to parse JSON response: %s", e)
-                logger.debug("Raw output: %s", raw_output)
-                return []
-                
-        except Exception as e:
-            logger.exception("Error during transaction categorization: %s", str(e))
-            return []
-
-def prepare_categorized_data_for_sheet(transactions_df: pd.DataFrame, 
-                                      categorized_transactions: List[Dict[str, Any]]) -> pd.DataFrame:
-    """
-    Prepare categorized transaction data for writing back to Google Sheets.
+    Main execution function.
     
     Args:
-        transactions_df: Original transactions DataFrame from Google Sheets
-        categorized_transactions: List of categorized transactions from LLM
-        
-    Returns:
-        DataFrame with original transactions and categorization results
+        llm_provider: Which LLM provider to use ('openai' or 'anthropic')
     """
-    logger.info("Preparing categorized data for sheet update")
-    
-    # Create a DataFrame from the categorized transactions
-    categorized_df = pd.DataFrame(categorized_transactions)
-    
-    # Ensure columns are properly formatted (case-insensitive matching)
-    if 'description' in categorized_df.columns:
-        categorized_df.rename(columns={'description': 'Description'}, inplace=True)
-    
-    # Merge with the original transactions DataFrame
-    logger.debug(f"Original transactions columns: {transactions_df.columns.tolist()}")
-    logger.debug(f"Categorized transactions columns: {categorized_df.columns.tolist()}")
-    
-    # Perform a left join to keep all original transactions
-    result_df = pd.merge(
-        transactions_df,
-        categorized_df,
-        on='Description',
-        how='left'
-    )
-    
-    logger.info(f"Merged data shape: {result_df.shape}")
-    logger.debug(f"Resulting columns: {result_df.columns.tolist()}")
-    
-    # Check if any transactions were not categorized
-    uncategorized_count = result_df['Category'].isna().sum()
-    if uncategorized_count > 0:
-        logger.warning(f"{uncategorized_count} transactions could not be categorized")
-    
-    logger.debug("Prepared data for sheet update")
-    return result_df
-
-
-def main():
-    """Main execution function."""
     # Load environment variables
     load_dotenv()
-    logger.info("Starting transaction categorization process")
+    logger.info(f"Starting transaction categorization process using {llm_provider}")
     
     try:
         # Initialize Google Sheets client
@@ -183,57 +74,85 @@ def main():
             spreadsheet_id=settings.SPREADSHEET_ID,
             range_name=f"{settings.CATEGORIES_SHEET_NAME}!{settings.CATEGORIES_RANGE}"
         )
-        categories_data = categories_df.to_dict(orient='records')
-        logger.debug("Loaded %d categories", len(categories_data))
         
-        # Load transactions
-        logger.info("Loading transactions from Google Sheets")
-        transactions_df = google_client.export_sheet_range(
+        logger.debug("Loaded %d categories", len(categories_df))
+        
+        # Load config
+        logger.info('Loading config information')
+        config_df = google_client.export_sheet_range(
             spreadsheet_id=settings.SPREADSHEET_ID,
-            range_name=f"{settings.TRANSACTIONS_SHEET_NAME}!{settings.TRANSACTIONS_RANGE}"
+            range_name=f"{settings.CONFIG_SHEET_NAME}!{settings.CONFIG_RANGE}"
         )
-        transactions_data = transactions_df.to_dict(orient='records')
-        logger.debug("Loaded %d transactions", len(transactions_data))
-        
-        # Initialize categorizer
-        categorizer = TransactionCategorizer(
-            api_key=os.getenv("OPENAI_API_KEY")
-        )
-        
-        # Categorize transactions
-        categorized_transactions = categorizer.categorize_transactions(
-            categories_data, 
-            transactions_data
-        )
-        
-        # Output results
-        if categorized_transactions:
-            # Prepare data for updating Google Sheets
-            updated_df = prepare_categorized_data_for_sheet(
-                transactions_df, 
-                categorized_transactions
+        logger.debug("Loaded %d config items", len(config_df))
+
+        # Initialize the appropriate categorizer
+        if llm_provider == "openai":
+            categorizer = OpenAITransactionCategorizer(
+                api_key=os.getenv("OPENAI_API_KEY")
             )
-            
-            # Define the output range - assuming we're updating the same sheet
-            # but potentially adding new columns
-            output_range = f"{settings.TRANSACTIONS_SHEET_NAME}!{settings.TRANSACTION_IMPORT_RANGE}"
-            
-            # Update Google Sheets with the categorized data
-            logger.info("Updating Google Sheets with categorized data")
-            google_client.update_sheet_range(
+        else:  # anthropic
+            categorizer = AnthropicTransactionCategorizer(
+                api_key=os.getenv("ANTHROPIC_API_KEY")
+            )
+
+        config_json = config_df.to_dict(orient='records')
+        for i, item in enumerate(config_json):
+            sheet = item.get('Sheet')
+            sheet_range = f"'{sheet}'!{item.get('Range')}"
+            description_column = item.get("Description Column")
+
+            # Load transactions
+            logger.info(f"Loading transactions from sheet in row {i}")
+            transactions_df = google_client.export_sheet_range(
                 spreadsheet_id=settings.SPREADSHEET_ID,
-                range_name=output_range,
-                df=updated_df
+                range_name=sheet_range
             )
-            
-            logger.info("Successfully updated Google Sheets with categorized transactions")
-            print(f"Successfully categorized and saved {len(categorized_transactions)} transactions")
-        else:
-            logger.warning("No transactions were categorized")
+            logger.debug("Loaded %d transactions", len(transactions_df))
+
+            system_prompt = build_categorization_prompt(categories_df.to_dict(orient='records'))
+
+            transactions_data = (
+                transactions_df[[description_column]]
+                .drop_duplicates()
+                .rename(columns={description_column: '_Description'})
+                .to_dict(orient='records'))
+
+            # Categorize transactions
+            categorized_transactions = categorizer.categorize_transactions(system_prompt,
+                transactions_data
+            )
+
+            # Output results
+            if categorized_transactions:
+                # Prepare data for updating Google Sheets
+                updated_df = prepare_categorized_data_for_sheet(
+                    transactions_df, 
+                    description_column,
+                    categorized_transactions
+                )
+
+                # Define the output range - assuming we're updating the same sheet
+                # but potentially adding new columns
+                output_range = f"{sheet}!A1"
+
+                # Update Google Sheets with the categorized data
+                logger.info("Updating Google Sheets with categorized data")
+                google_client.update_sheet_range(
+                    spreadsheet_id=settings.SPREADSHEET_ID,
+                    range_name=output_range,
+                    df=updated_df
+                )
+
+                logger.info(f"Successfully updated Google Sheet row {i} with categorized transactions")
+                print(f"Successfully categorized and saved {len(categorized_transactions)} transactions from Google Sheet row {i}")
+            else:
+                logger.warning("No transactions were categorized")
             
     except Exception as e:
         logger.exception("Error in transaction categorization pipeline: %s", str(e))
         
 
 if __name__ == "__main__":
-    main()
+    # By default, use "openai", but can be changed to "anthropic" or 
+    # Can be modified to accept command line arguments if desired
+    main(llm_provider="openai")
