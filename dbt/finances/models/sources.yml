@@ -1,0 +1,15 @@
+version: 2
+
+sources:
+  - name: external_transactions
+    description: "External tables connected directly to Google Sheets containing raw transaction data"
+    tables:
+      - name: ext_transactions_person_a_bank_1_checking
+        description: "Person A's primary bank chequing account transactions"
+        external:
+          location: "https://docs.google.com/spreadsheets/d/{{ var('google_sheet_id') }}"
+          options:
+            format: 'GOOGLE_SHEETS'
+            sheet_range: "'Lorcan BMO'!A:G"
+            skip_leading_rows: 1
+
