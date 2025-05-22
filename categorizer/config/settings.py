@@ -20,7 +20,7 @@ GOOGLE_CREDENTIALS_PATH =  "config/encrypt_google_cloud_credentials.json"
 
 # Sheet names and ranges
 CATEGORIES_SHEET_NAME = 'Categories'
-CATEGORIES_RANGE = 'A:B'
+CATEGORIES_RANGE = 'B:C'
 CONFIG_SHEET_NAME = 'CONFIG'
 CONFIG_RANGE = 'A:E'
 

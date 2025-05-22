@@ -142,7 +142,7 @@ class AnthropicTransactionCategorizer:
     A class to categorize financial transactions using Anthropic's Claude.
     """
 
-    def __init__(self, api_key: str, model: str = "claude-3-haiku-20240307", temperature: float = 0):
+    def __init__(self, api_key: str, model_name: str = "claude-3-haiku-20240307", temperature: float = 0):
         """
         Initialize the Anthropic TransactionCategorizer.
 
@@ -151,9 +151,9 @@ class AnthropicTransactionCategorizer:
             model: Anthropic model to use (default: claude-3-7-sonnet-20250219)
             temperature: Temperature parameter for LLM generation
         """
-        logger.info(f"Initializing AnthropicTransactionCategorizer with model: {model}")
+        logger.info(f"Initializing AnthropicTransactionCategorizer with model: {model_name}")
         self.client = Anthropic(api_key=api_key)
-        self.model = model
+        self.model = model_name
         self.temperature = temperature
     
     def categorize_transactions(self, prompt,

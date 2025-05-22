@@ -50,7 +50,7 @@ if not logger.handlers:
     logger.addHandler(file_handler)
 
 
-def main(llm_provider: Literal["openai", "anthropic"] = "openai"):
+def main(llm_provider: Literal["openai", "anthropic"], model_name):
     """
     Main execution function.
     
@@ -88,11 +88,11 @@ def main(llm_provider: Literal["openai", "anthropic"] = "openai"):
         # Initialize the appropriate categorizer
         if llm_provider == "openai":
             categorizer = OpenAITransactionCategorizer(
-                api_key=os.getenv("OPENAI_API_KEY")
+                api_key=os.getenv("OPENAI_API_KEY"), model_name=model_name
             )
         else:  # anthropic
             categorizer = AnthropicTransactionCategorizer(
-                api_key=os.getenv("ANTHROPIC_API_KEY")
+                api_key=os.getenv("ANTHROPIC_API_KEY"), model_name=model_name
             )
 
         config_json = config_df.to_dict(orient='records')
@@ -111,16 +111,21 @@ def main(llm_provider: Literal["openai", "anthropic"] = "openai"):
 
             system_prompt = build_categorization_prompt(categories_df.to_dict(orient='records'))
 
-            transactions_data = (
+            unique_transactions = (
                 transactions_df[[description_column]]
                 .drop_duplicates()
                 .rename(columns={description_column: '_Description'})
                 .to_dict(orient='records'))
 
             # Categorize transactions
-            categorized_transactions = categorizer.categorize_transactions(system_prompt,
-                transactions_data
-            )
+            # Categorize in batches of 100
+            batch_size = 100
+            categorized_transactions = []
+
+            for i in range(0, len(unique_transactions), batch_size):
+                batch = unique_transactions[i:i + batch_size]
+                categorized_batch = categorizer.categorize_transactions(system_prompt, batch)
+                categorized_transactions.extend(categorized_batch)
 
             # Output results
             if categorized_transactions:
@@ -155,4 +160,19 @@ def main(llm_provider: Literal["openai", "anthropic"] = "openai"):
 if __name__ == "__main__":
     # By default, use "openai", but can be changed to "anthropic" or 
     # Can be modified to accept command line arguments if desired
-    main(llm_provider="openai")
+    main(llm_provider="openai", model_name="gpt-4o")
+
+    """
+    OpenAI Models (Cheapest to Most Expensive)
+    gpt-3.5-turbo: Basic model, good for everyday tasks, most cost-effective
+    gpt-4o: Balanced performance and cost, more capable than 3.5
+    gpt-4-turbo: Higher performance, more expensive than 4o
+    gpt-4: Premium model, highest cost, best capabilities
+
+    Anthropic Models (Cheapest to Most Expensive)
+
+    claude-3-haiku-20240307: Fastest, most cost-effective model
+    claude-3-5-sonnet-20240620: Mid-tier pricing, improved capabilities
+    claude-3-opus-20240229: High-performance, premium pricing
+    claude-3-7-sonnet-20250219: Most advanced reasoning, highest cost
+    """
